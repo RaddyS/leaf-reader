@@ -132,6 +132,9 @@ ReaderWindow::ReaderWindow(QWidget *parent) : QMainWindow(parent) {
     reader->settings()->setAttribute(QWebEngineSettings::LocalContentCanAccessFileUrls, true);
     reader->settings()->setAttribute(QWebEngineSettings::PdfViewerEnabled, true);
     reader->settings()->setAttribute(QWebEngineSettings::PluginsEnabled, true);
+    connect(reader, &QWebEngineView::loadFinished, this, [this](bool loaded) {
+        if (loaded) setReadingCursorEnabled(cursorButton->isChecked());
+    });
     reader->setHtml("<div style='margin:15%; text-align:center'><h1>Leaf Reader</h1><p>A quiet place for your books.</p><p>Open an EPUB, PDF, TXT, HTML, or Markdown file.</p></div>");
     splitter->addWidget(sidebar); splitter->addWidget(reader);
     splitter->setStretchFactor(1, 1); splitter->setSizes({250, 900});
@@ -144,10 +147,6 @@ ReaderWindow::ReaderWindow(QWidget *parent) : QMainWindow(parent) {
     rateSlider->setValue(settings.value("speech/rate", 0).toInt());
     cursorButton->setChecked(settings.value("speech/readingCursor", true).toBool());
     applyAppearance();
-
-    connect(reader, &QWebEngineView::loadFinished, this, [this](bool loaded) {
-        if (loaded) setReadingCursorEnabled(cursorButton->isChecked());
-    });
 
     connect(piperProcess, &QProcess::finished, this, [this](int exitCode, QProcess::ExitStatus status) {
         if (status == QProcess::NormalExit && exitCode == 0 && speechTemp && speechTemp->isValid()) {
@@ -311,10 +310,30 @@ void ReaderWindow::setReadingCursorEnabled(bool enabled) {
             @keyframes leaf-reader-blink { 50% { opacity: .25; } }`;
             (document.head || document.documentElement).appendChild(style);
           }
+          window.__leafPlaceCursor = (node, offset, shouldScroll = false) => {
+            if (!node) return false;
+            document.getElementById('__leaf_reader_cursor')?.remove();
+            const marker = document.createElement('span');
+            marker.id = '__leaf_reader_cursor';
+            marker.setAttribute('role', 'mark');
+            marker.setAttribute('aria-label', 'Reading starts here');
+            const range = document.createRange();
+            try {
+              const maximum = node.nodeType === Node.TEXT_NODE ? node.length : node.childNodes.length;
+              range.setStart(node, Math.max(0, Math.min(offset, maximum)));
+              range.collapse(true);
+              range.insertNode(marker);
+              if (shouldScroll) marker.scrollIntoView({ block: 'center', behavior: 'smooth' });
+              return true;
+            } catch (_) {
+              marker.remove();
+              return false;
+            }
+          };
           if (!window.__leafCursorHandlerInstalled) {
             document.addEventListener('click', (event) => {
               if (!window.__leafCursorEnabled || event.button !== 0) return;
-              if (event.target.closest('a, button, input, select, textarea')) return;
+              if (event.target instanceof Element && event.target.closest('a, button, input, select, textarea')) return;
               const position = document.caretPositionFromPoint
                 ? document.caretPositionFromPoint(event.clientX, event.clientY) : null;
               const legacy = !position && document.caretRangeFromPoint
@@ -322,19 +341,18 @@ void ReaderWindow::setReadingCursorEnabled(bool enabled) {
               const node = position ? position.offsetNode : legacy ? legacy.startContainer : null;
               const offset = position ? position.offset : legacy ? legacy.startOffset : 0;
               if (!node || (node.nodeType !== Node.TEXT_NODE && node.nodeType !== Node.ELEMENT_NODE)) return;
-              document.getElementById('__leaf_reader_cursor')?.remove();
-              const marker = document.createElement('span');
-              marker.id = '__leaf_reader_cursor';
-              marker.setAttribute('aria-label', 'Reading starts here');
-              const range = document.createRange();
-              try {
-                range.setStart(node, Math.min(offset, node.length ?? node.childNodes.length));
-                range.collapse(true);
-                range.insertNode(marker);
-                marker.scrollIntoView({ block: 'center', behavior: 'smooth' });
-              } catch (_) { marker.remove(); }
+              window.__leafPlaceCursor(node, offset, true);
             }, true);
             window.__leafCursorHandlerInstalled = true;
+          }
+          if (!old && document.body) {
+            const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, {
+              acceptNode: (node) => node.textContent.trim() &&
+                !node.parentElement?.closest('script, style, noscript')
+                  ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT
+            });
+            const firstText = walker.nextNode();
+            if (firstText) window.__leafPlaceCursor(firstText, 0, false);
           }
         })();
     )JS").arg(enabled ? "true" : "false");
@@ -443,6 +461,7 @@ void ReaderWindow::applyAppearance() {
         QListWidget::item { padding: 9px 8px; border-radius: 5px; }
         QListWidget::item:selected { background: %5; color: white; }
         QPushButton, QComboBox { background: %2; border: 1px solid %4; border-radius: 6px; padding: 6px 10px; }
+        QPushButton:checked { background: %5; color: white; border-color: %5; }
         QPushButton:hover, QComboBox:hover { border-color: %5; }
         QLabel#bookTitle { font-size: 18px; font-weight: 700; padding: 8px 4px; }
     )").arg(bg, page, ink, muted, accent));
