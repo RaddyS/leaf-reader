@@ -13,6 +13,7 @@
 #include <QFile>
 #include <QFileDialog>
 #include <QFileInfo>
+#include <QtEndian>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QListWidget>
@@ -56,6 +57,22 @@ static QString piperVoiceLabel(const QString &modelPath) {
     return QString("%1 — %2, %3 (Piper)").arg(voice, locale, quality);
 }
 
+static qint64 wavDurationMs(const QString &path) {
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly)) return 0;
+    const QByteArray wav = file.readAll();
+    if (wav.size() < 44 || wav.left(4) != "RIFF" || wav.mid(8, 4) != "WAVE") return 0;
+    const auto u16 = [&wav](int offset) { return qFromLittleEndian<quint16>(reinterpret_cast<const uchar *>(wav.constData() + offset)); };
+    const auto u32 = [&wav](int offset) { return qFromLittleEndian<quint32>(reinterpret_cast<const uchar *>(wav.constData() + offset)); };
+    const quint16 channels = u16(22);
+    const quint32 sampleRate = u32(24);
+    const quint16 bits = u16(34);
+    const int dataTag = wav.indexOf("data", 36);
+    if (!channels || !sampleRate || !bits || dataTag < 0 || dataTag + 8 > wav.size()) return 0;
+    const quint32 dataBytes = u32(dataTag + 4);
+    return qint64(dataBytes) * 8000 / (qint64(sampleRate) * channels * bits);
+}
+
 ReaderWindow::ReaderWindow(QWidget *parent) : QMainWindow(parent) {
     setWindowTitle("Leaf Reader");
     setMinimumSize(820, 560);
@@ -66,8 +83,18 @@ ReaderWindow::ReaderWindow(QWidget *parent) : QMainWindow(parent) {
     const QString speechEngine = speechEngines.contains("flite") ? QStringLiteral("flite") : QString();
     speech = new QTextToSpeech(speechEngine, this);
     connect(speech, &QTextToSpeech::stateChanged, this, &ReaderWindow::speechStateChanged);
+    connect(speech, &QTextToSpeech::sayingWord, this, [this](const QString &, qsizetype, qsizetype start, qsizetype) {
+        int word = 0;
+        auto matches = QRegularExpression("\\S+").globalMatch(activeSpeechText.left(start));
+        while (matches.hasNext()) { matches.next(); ++word; }
+        if (speechIsPdf) pdfReader->setPlaybackWord(word);
+        else reader->page()->runJavaScript(QString("window.__leafSetReadingWord?.(%1)").arg(word));
+    });
     piperProcess = new QProcess(this);
     audioProcess = new QProcess(this);
+    speechCursorTimer = new QTimer(this);
+    speechCursorTimer->setInterval(55);
+    connect(speechCursorTimer, &QTimer::timeout, this, &ReaderWindow::updateSpeechCursor);
     speechTemp = std::make_unique<QTemporaryDir>();
 
     auto *bar = addToolBar("Reader controls");
@@ -157,7 +184,11 @@ ReaderWindow::ReaderWindow(QWidget *parent) : QMainWindow(parent) {
 
     connect(piperProcess, &QProcess::finished, this, [this](int exitCode, QProcess::ExitStatus status) {
         if (status == QProcess::NormalExit && exitCode == 0 && speechTemp && speechTemp->isValid()) {
-            audioProcess->start("pw-play", {speechTemp->filePath("speech.wav")});
+            const QString audioPath = speechTemp->filePath("speech.wav");
+            speechDurationMs = wavDurationMs(audioPath);
+            speechClock.start();
+            speechCursorTimer->start();
+            audioProcess->start("pw-play", {audioPath});
             speakButton->setText("Stop reading");
             speakButton->setToolTip("Playing with Piper neural voice");
         } else if (status != QProcess::NormalExit || exitCode != 0) {
@@ -167,6 +198,7 @@ ReaderWindow::ReaderWindow(QWidget *parent) : QMainWindow(parent) {
         }
     });
     connect(audioProcess, &QProcess::finished, this, [this] {
+        speechCursorTimer->stop();
         speakButton->setText("Read aloud");
         speakButton->setToolTip("Piper neural voice");
     });
@@ -295,8 +327,25 @@ void ReaderWindow::showChapter(int index) {
 void ReaderWindow::speakText(const QString &rawText) {
     const QString text = rawText.trimmed().left(12000);
     if (text.isEmpty()) return;
+    activeSpeechText = text;
+    speechIsPdf = QFileInfo(currentPath).suffix().toLower() == "pdf";
     if (voiceBox->currentData().toString().startsWith("piper:")) startPiper(text);
     else speech->say(text);
+}
+
+void ReaderWindow::updateSpeechCursor() {
+    if (speechDurationMs <= 0 || speechWordWeights.isEmpty()) return;
+    const double progress = std::clamp(double(speechClock.elapsed()) / speechDurationMs, 0.0, 1.0);
+    const double target = progress * speechWordWeights.last();
+    const int word = std::clamp(int(std::lower_bound(speechWordWeights.cbegin(), speechWordWeights.cend(), target)
+        - speechWordWeights.cbegin()), 0, int(speechWordWeights.size()) - 1);
+    if (speechIsPdf) pdfReader->setPlaybackWord(word);
+    else reader->page()->runJavaScript(QString("window.__leafSetReadingWord?.(%1)").arg(word));
+}
+
+void ReaderWindow::clearSpeechHighlight() {
+    speechCursorTimer->stop();
+    reader->page()->runJavaScript("CSS.highlights?.delete('leaf-reading-word')");
 }
 
 void ReaderWindow::setReadingCursorEnabled(bool enabled) {
@@ -382,11 +431,22 @@ void ReaderWindow::toggleSpeech() {
         return;
     }
     reader->page()->runJavaScript(
-        "(() => { const selected = window.getSelection().toString().trim(); if (selected) return selected; "
-        "const marker = document.getElementById('__leaf_reader_cursor'); "
-        "if (marker && document.body) { const range = document.createRange(); range.setStartAfter(marker); "
-        "range.setEndAfter(document.body.lastChild || document.body); return range.toString(); } "
-        "return document.body ? document.body.innerText : ''; })()",
+        "(() => { const selected = window.getSelection().toString().trim(); "
+        "const marker = document.getElementById('__leaf_reader_cursor'); const scope = document.createRange(); "
+        "if (selected) { const chosen = window.getSelection().getRangeAt(0); scope.setStart(chosen.startContainer, chosen.startOffset); scope.setEnd(chosen.endContainer, chosen.endOffset); } "
+        "else { scope.selectNodeContents(document.body); if (marker) scope.setStartAfter(marker); } "
+        "const ranges = []; const root = scope.commonAncestorContainer; const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT); "
+        "if (root.nodeType === Node.TEXT_NODE) { const text = root.data.slice(scope.startOffset, scope.endOffset); "
+        "for (const match of text.matchAll(/\\S+/g)) { const range = document.createRange(); range.setStart(root, scope.startOffset + match.index); range.setEnd(root, scope.startOffset + match.index + match[0].length); ranges.push(range); } } "
+        "else while (walker.nextNode()) { const node = walker.currentNode; if (!scope.intersectsNode(node)) continue; "
+        "const start = node === scope.startContainer ? scope.startOffset : 0; const end = node === scope.endContainer ? scope.endOffset : node.length; "
+        "for (const match of node.data.slice(start, end).matchAll(/\\S+/g)) { const range = document.createRange(); range.setStart(node, start + match.index); range.setEnd(node, start + match.index + match[0].length); ranges.push(range); } } "
+        "window.__leafReadingWordRanges = ranges; window.__leafSetReadingWord = (index) => { if (!CSS.highlights || !ranges.length) return; "
+        "const range = ranges[Math.max(0, Math.min(index, ranges.length - 1))]; CSS.highlights.set('leaf-reading-word', new Highlight(range)); "
+        "range.startContainer.parentElement?.scrollIntoView({block:'center', behavior:'smooth'}); }; "
+        "if (!document.getElementById('__leaf_reading_highlight_style')) { const style = document.createElement('style'); style.id='__leaf_reading_highlight_style'; "
+        "style.textContent='::highlight(leaf-reading-word){background:#55b87999;color:inherit}'; (document.head || document.documentElement).appendChild(style); } "
+        "return scope.toString(); })()",
         [this](const QVariant &result) { speakText(result.toString()); });
 }
 
@@ -395,6 +455,7 @@ bool ReaderWindow::piperIsActive() const {
 }
 
 void ReaderWindow::stopSpeech() {
+    clearSpeechHighlight();
     speech->stop();
     if (piperProcess->state() != QProcess::NotRunning) piperProcess->kill();
     if (audioProcess->state() != QProcess::NotRunning) audioProcess->kill();
@@ -412,6 +473,19 @@ void ReaderWindow::startPiper(const QString &text) {
     }
 
     const double lengthScale = std::clamp(1.0 - rateSlider->value() / 16.0, 0.55, 1.6);
+    speechIsPdf = QFileInfo(currentPath).suffix().toLower() == "pdf";
+    speechWordWeights.clear();
+    double cumulativeWeight = 0;
+    auto words = QRegularExpression("\\S+").globalMatch(text);
+    const QRegularExpression longPause("[.!?][\\\"')\\]]*$");
+    const QRegularExpression shortPause("[,;:][\\\"')\\]]*$");
+    while (words.hasNext()) {
+        const QString word = words.next().captured();
+        cumulativeWeight += std::max(1, int(word.size()));
+        if (longPause.match(word).hasMatch()) cumulativeWeight += 6;
+        else if (shortPause.match(word).hasMatch()) cumulativeWeight += 2.5;
+        speechWordWeights.append(cumulativeWeight);
+    }
     const QString output = speechTemp->filePath("speech.wav");
     piperProcess->setProgram(python);
     piperProcess->setArguments({"-m", "piper", "-m", model, "-f", output,

@@ -50,13 +50,20 @@ void PdfPageView::setZoomFactor(double factor) {
     renderPage();
 }
 
-QString PdfPageView::speechText() const {
+QString PdfPageView::speechText() {
+    playbackStartWord = cursorEnabled ? cursorWord : 0;
     QString result;
-    for (int i = cursorEnabled ? cursorWord : 0; i < int(words.size()); ++i) {
+    for (int i = playbackStartWord; i < int(words.size()); ++i) {
         result += words[i]->text();
         if (words[i]->hasSpaceAfter()) result += ' ';
     }
     return result.trimmed();
+}
+
+void PdfPageView::setPlaybackWord(int offset) {
+    if (words.empty()) return;
+    cursorWord = std::clamp(playbackStartWord + offset, 0, int(words.size()) - 1);
+    update();
 }
 
 QRectF PdfPageView::pageRectangle() const {

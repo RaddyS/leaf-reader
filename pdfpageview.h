@@ -18,7 +18,8 @@ public:
     void setPage(int page);
     void setCursorEnabled(bool enabled);
     void setZoomFactor(double factor);
-    QString speechText() const;
+    QString speechText();
+    void setPlaybackWord(int offset);
 
 protected:
     void paintEvent(QPaintEvent *event) override;
@@ -36,6 +37,7 @@ private:
     QImage pageImage;
     int currentPage = 0;
     int cursorWord = 0;
+    int playbackStartWord = 0;
     bool cursorEnabled = true;
     double zoomFactor = 1.0;
     double renderedScale = 1.0;

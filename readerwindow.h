@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QMainWindow>
+#include <QElapsedTimer>
 #include <QTextToSpeech>
 #include <QVector>
 
@@ -52,6 +53,8 @@ private:
     bool piperIsActive() const;
     void speakText(const QString &text);
     void setReadingCursorEnabled(bool enabled);
+    void updateSpeechCursor();
+    void clearSpeechHighlight();
 
     QWebEngineView *reader;
     PdfPageView *pdfReader;
@@ -68,6 +71,12 @@ private:
     QTextToSpeech *speech;
     QProcess *piperProcess;
     QProcess *audioProcess;
+    QTimer *speechCursorTimer;
+    QElapsedTimer speechClock;
+    QVector<double> speechWordWeights;
+    qint64 speechDurationMs = 0;
+    bool speechIsPdf = false;
+    QString activeSpeechText;
     std::unique_ptr<QTemporaryDir> speechTemp;
     QVector<Chapter> chapters;
     QString currentPath;
