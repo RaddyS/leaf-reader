@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Leaf Reader",
   "description": "Read selected text and web articles aloud with private, local Piper voices.",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAytjvDD2GDLt46E1TMK2ARYa9QvD/VSWqsHICTU8hhyBVzaoQh4mX8TOQqjeqIb4cxRwqNtNhSIhlpX4ba61D0f5AdXxiSp1efYhLgyfZPesb6ROnnW56drVQF6at/E12KIiwuxgfp8cs3MQrFwXfD1ss3G5EvroboygVeiHqVMxW/jG8tXW3ZWqsXIXjBktzAhPX6D6Y6m4+/ffUZQbvWj4vcRWKWWYnJrBj9M31XwzyK6AQPl7y4dA9/6rdknfgOAsm6dNM3lcSSP4IfCkXvQjpiLyYA6bmEEIuoTcCKCRYdBCI6C2Zvl89vnAXT0SmiK9AjkPFNDBI9WSV0EreewIDAQAB",
   "permissions": ["activeTab", "scripting", "nativeMessaging", "storage"],
   "background": { "service_worker": "service-worker.js" },

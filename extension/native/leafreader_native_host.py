@@ -3,12 +3,15 @@
 
 import json
 import os
+import re
 import signal
 import struct
 import subprocess
 import sys
 import tempfile
 import threading
+import time
+import wave
 from pathlib import Path
 
 DATA_ROOT = Path.home() / ".local" / "share" / "leafreader"
@@ -77,15 +80,38 @@ def synthesize(request_id: int, voice_id: str, text: str, speed: float, token: i
                 return
             if process.returncode:
                 raise RuntimeError(stderr or "Piper synthesis failed")
-            send({"id": request_id, "event": "playing"})
+            with wave.open(str(output), "rb") as wav_file:
+                duration = wav_file.getnframes() / wav_file.getframerate()
+            word_weights = []
+            total_weight = 0.0
+            for word in re.findall(r"\S+", text):
+                total_weight += max(1, len(word))
+                if re.search(r"[.!?][\"')\]]*$", word):
+                    total_weight += 6
+                elif re.search(r"[,;:][\"')\]]*$", word):
+                    total_weight += 2.5
+                word_weights.append(total_weight)
+            send({"id": request_id, "event": "playing", "duration_ms": round(duration * 1000)})
             process = subprocess.Popen(["pw-play", str(output)], start_new_session=True,
                                        stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
             with process_lock:
                 current_process = process
+            started = time.monotonic()
+            current_word = -1
+            while process.poll() is None and token == generation:
+                if word_weights and duration > 0:
+                    target = min(1.0, (time.monotonic() - started) / duration) * total_weight
+                    next_word = next((i for i, weight in enumerate(word_weights) if weight >= target), len(word_weights) - 1)
+                    if next_word != current_word:
+                        current_word = next_word
+                        send({"id": request_id, "event": "progress", "word": current_word})
+                time.sleep(0.055)
             stderr = process.communicate()[1].decode("utf-8", "replace").strip()
             if token == generation and process.returncode:
                 raise RuntimeError(stderr or "Audio playback failed")
             if token == generation:
+                if word_weights:
+                    send({"id": request_id, "event": "progress", "word": len(word_weights) - 1})
                 send({"id": request_id, "event": "finished"})
     except Exception as error:
         if token == generation:

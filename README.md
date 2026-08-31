@@ -15,6 +15,7 @@ using local Piper neural voices—no book text is sent to a cloud service.
 - Offline Piper neural voices with automatic model discovery
 - Flite fallback through Qt Text-to-Speech
 - Manifest V3 Chromium extension for reading selected text or web articles
+- Synchronized moving word highlight in the Chromium extension
 - Shared local voices between the desktop app and browser extension
 
 ## Requirements
