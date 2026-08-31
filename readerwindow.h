@@ -14,6 +14,7 @@ class QWebEngineView;
 class QStackedWidget;
 class QTemporaryDir;
 class QProcess;
+class QEvent;
 class PdfPageView;
 
 struct Chapter { QString title; QString html; QString source; };
@@ -26,6 +27,7 @@ public:
     void openBook(const QString &path);
 
 protected:
+    void changeEvent(QEvent *event) override;
     void closeEvent(QCloseEvent *event) override;
     void dragEnterEvent(QDragEnterEvent *event) override;
     void dropEvent(QDropEvent *event) override;
@@ -55,23 +57,24 @@ private:
     void setReadingCursorEnabled(bool enabled);
     void updateSpeechCursor();
     void clearSpeechHighlight();
+    void applyDocumentAppearance();
 
-    QWebEngineView *reader;
-    PdfPageView *pdfReader;
-    QStackedWidget *contentStack;
-    QListWidget *chaptersList;
-    QLabel *bookTitle;
-    QLabel *progressLabel;
-    QPushButton *speakButton;
-    QPushButton *cursorButton;
-    QSlider *fontSlider;
-    QSlider *rateSlider;
-    QComboBox *themeBox;
-    QComboBox *voiceBox;
-    QTextToSpeech *speech;
-    QProcess *piperProcess;
-    QProcess *audioProcess;
-    QTimer *speechCursorTimer;
+    QWebEngineView *reader = nullptr;
+    PdfPageView *pdfReader = nullptr;
+    QStackedWidget *contentStack = nullptr;
+    QListWidget *chaptersList = nullptr;
+    QLabel *bookTitle = nullptr;
+    QLabel *progressLabel = nullptr;
+    QPushButton *speakButton = nullptr;
+    QPushButton *cursorButton = nullptr;
+    QSlider *fontSlider = nullptr;
+    QSlider *rateSlider = nullptr;
+    QComboBox *themeBox = nullptr;
+    QComboBox *voiceBox = nullptr;
+    QTextToSpeech *speech = nullptr;
+    QProcess *piperProcess = nullptr;
+    QProcess *audioProcess = nullptr;
+    QTimer *speechCursorTimer = nullptr;
     QElapsedTimer speechClock;
     QVector<double> speechWordWeights;
     qint64 speechDurationMs = 0;

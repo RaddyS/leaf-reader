@@ -10,6 +10,7 @@
 #include <QDomDocument>
 #include <QDragEnterEvent>
 #include <QDropEvent>
+#include <QEvent>
 #include <QFile>
 #include <QFileDialog>
 #include <QFileInfo>
@@ -19,6 +20,7 @@
 #include <QListWidget>
 #include <QMessageBox>
 #include <QMimeData>
+#include <QPalette>
 #include <QProcess>
 #include <QPushButton>
 #include <QRegularExpression>
@@ -36,6 +38,40 @@
 #include <QWebEngineSettings>
 #include <QWebEngineView>
 #include <algorithm>
+
+struct ReadingColors {
+    QColor background;
+    QColor page;
+    QColor ink;
+    QColor muted;
+    QColor accent;
+    QColor selectedInk;
+};
+
+static ReadingColors colorsForTheme(const QString &theme, const QPalette &systemPalette) {
+    if (theme == "night")
+        return {{"#171918"}, {"#202321"}, {"#e7e3d8"}, {"#9da49d"}, {"#8fbf9f"}, {"#171918"}};
+    if (theme == "sepia")
+        return {{"#d9c9a7"}, {"#efe2c2"}, {"#443828"}, {"#796b55"}, {"#8a5a32"}, {"#ffffff"}};
+    if (theme == "paper")
+        return {{"#deded9"}, {"#faf9f5"}, {"#292c29"}, {"#747a74"}, {"#477a59"}, {"#ffffff"}};
+
+    return {
+        systemPalette.color(QPalette::Window),
+        systemPalette.color(QPalette::Base),
+        systemPalette.color(QPalette::Text),
+        systemPalette.color(QPalette::PlaceholderText),
+        systemPalette.color(QPalette::Highlight),
+        systemPalette.color(QPalette::HighlightedText)
+    };
+}
+
+static QString cssRgba(QColor color, int alpha) {
+    color.setAlpha(alpha);
+    return QString("rgba(%1, %2, %3, %4)")
+        .arg(color.red()).arg(color.green()).arg(color.blue())
+        .arg(color.alphaF(), 0, 'f', 3);
+}
 
 static QString readUtf8(const QString &path) {
     QFile file(path);
@@ -138,7 +174,11 @@ ReaderWindow::ReaderWindow(QWidget *parent) : QMainWindow(parent) {
     bar->addWidget(fontSlider);
 
     themeBox = new QComboBox;
-    themeBox->addItems({"Paper", "Sepia", "Night"});
+    themeBox->addItem("System", "system");
+    themeBox->addItem("Paper", "paper");
+    themeBox->addItem("Sepia", "sepia");
+    themeBox->addItem("Night", "night");
+    themeBox->setToolTip("Reading theme; app controls follow the system theme");
     connect(themeBox, &QComboBox::currentIndexChanged, this, &ReaderWindow::applyAppearance);
     bar->addWidget(themeBox);
 
@@ -148,7 +188,11 @@ ReaderWindow::ReaderWindow(QWidget *parent) : QMainWindow(parent) {
     auto *sideLayout = new QVBoxLayout(sidebar);
     bookTitle = new QLabel("Your library starts here");
     bookTitle->setWordWrap(true);
-    bookTitle->setObjectName("bookTitle");
+    QFont titleFont = bookTitle->font();
+    titleFont.setPointSizeF(titleFont.pointSizeF() + 2.0);
+    titleFont.setBold(true);
+    bookTitle->setFont(titleFont);
+    bookTitle->setContentsMargins(4, 8, 4, 8);
     sideLayout->addWidget(bookTitle);
     chaptersList = new QListWidget;
     sideLayout->addWidget(chaptersList, 1);
@@ -162,7 +206,10 @@ ReaderWindow::ReaderWindow(QWidget *parent) : QMainWindow(parent) {
     reader->settings()->setAttribute(QWebEngineSettings::PdfViewerEnabled, true);
     reader->settings()->setAttribute(QWebEngineSettings::PluginsEnabled, true);
     connect(reader, &QWebEngineView::loadFinished, this, [this](bool loaded) {
-        if (loaded) setReadingCursorEnabled(cursorButton->isChecked());
+        if (loaded) {
+            applyDocumentAppearance();
+            setReadingCursorEnabled(cursorButton->isChecked());
+        }
     });
     reader->setHtml("<div style='margin:15%; text-align:center'><h1>Leaf Reader</h1><p>A quiet place for your books.</p><p>Open an EPUB, PDF, TXT, HTML, or Markdown file.</p></div>");
     pdfReader = new PdfPageView;
@@ -177,7 +224,15 @@ ReaderWindow::ReaderWindow(QWidget *parent) : QMainWindow(parent) {
     QSettings settings;
     restoreGeometry(settings.value("window/geometry").toByteArray());
     fontSlider->setValue(settings.value("appearance/fontSize", 20).toInt());
-    themeBox->setCurrentIndex(settings.value("appearance/theme", 0).toInt());
+    QString readingTheme = settings.value("appearance/readingTheme").toString();
+    if (readingTheme.isEmpty() && settings.contains("appearance/theme")) {
+        const QStringList legacyThemes = {"paper", "sepia", "night"};
+        const int legacyIndex = settings.value("appearance/theme").toInt();
+        if (legacyIndex >= 0 && legacyIndex < legacyThemes.size()) readingTheme = legacyThemes[legacyIndex];
+    }
+    if (readingTheme.isEmpty()) readingTheme = "system";
+    const int readingThemeIndex = themeBox->findData(readingTheme);
+    themeBox->setCurrentIndex(readingThemeIndex >= 0 ? readingThemeIndex : 0);
     rateSlider->setValue(settings.value("speech/rate", 0).toInt());
     cursorButton->setChecked(settings.value("speech/readingCursor", true).toBool());
     applyAppearance();
@@ -365,7 +420,8 @@ void ReaderWindow::setReadingCursorEnabled(bool enabled) {
               display: inline-block !important; width: 3px !important;
               height: 1.15em !important; margin: 0 2px !important;
               vertical-align: text-bottom !important; border-radius: 2px !important;
-              background: #55b879 !important; box-shadow: 0 0 0 2px #55b87933 !important;
+              background: var(--leaf-reader-accent, #55b879) !important;
+              box-shadow: 0 0 0 2px var(--leaf-reader-accent-faint, #55b87933) !important;
               animation: leaf-reader-blink 1.1s step-end infinite !important;
             }
             @keyframes leaf-reader-blink { 50% { opacity: .25; } }`;
@@ -445,7 +501,7 @@ void ReaderWindow::toggleSpeech() {
         "const range = ranges[Math.max(0, Math.min(index, ranges.length - 1))]; CSS.highlights.set('leaf-reading-word', new Highlight(range)); "
         "range.startContainer.parentElement?.scrollIntoView({block:'center', behavior:'smooth'}); }; "
         "if (!document.getElementById('__leaf_reading_highlight_style')) { const style = document.createElement('style'); style.id='__leaf_reading_highlight_style'; "
-        "style.textContent='::highlight(leaf-reading-word){background:#55b87999;color:inherit}'; (document.head || document.documentElement).appendChild(style); } "
+        "style.textContent='::highlight(leaf-reading-word){background:var(--leaf-reader-accent-soft,#55b87999);color:inherit}'; (document.head || document.documentElement).appendChild(style); } "
         "return scope.toString(); })()",
         [this](const QVariant &result) { speakText(result.toString()); });
 }
@@ -533,24 +589,60 @@ void ReaderWindow::speechStateChanged(QTextToSpeech::State state) {
 }
 
 void ReaderWindow::applyAppearance() {
-    QString bg, page, ink, muted, accent;
-    if (themeBox->currentIndex() == 2) { bg="#171918"; page="#202321"; ink="#e7e3d8"; muted="#9da49d"; accent="#8fbf9f"; }
-    else if (themeBox->currentIndex() == 1) { bg="#d9c9a7"; page="#efe2c2"; ink="#443828"; muted="#796b55"; accent="#8a5a32"; }
-    else { bg="#deded9"; page="#faf9f5"; ink="#292c29"; muted="#747a74"; accent="#477a59"; }
-    qApp->setStyleSheet(QString(R"(
-        QMainWindow, QToolBar, QWidget { background: %1; color: %3; }
-        QToolBar { border: none; spacing: 8px; padding: 8px; }
-        QTextBrowser { background: %2; color: %3; border: none; padding: 42px; selection-background-color: %5; }
-        QListWidget { background: transparent; border: none; outline: none; }
-        QListWidget::item { padding: 9px 8px; border-radius: 5px; }
-        QListWidget::item:selected { background: %5; color: white; }
-        QPushButton, QComboBox { background: %2; border: 1px solid %4; border-radius: 6px; padding: 6px 10px; }
-        QPushButton:checked { background: %5; color: white; border-color: %5; }
-        QPushButton:hover, QComboBox:hover { border-color: %5; }
-        QLabel#bookTitle { font-size: 18px; font-weight: 700; padding: 8px 4px; }
-    )").arg(bg, page, ink, muted, accent));
     reader->setZoomFactor(fontSlider->value() / 20.0);
     pdfReader->setZoomFactor(fontSlider->value() / 20.0);
+    applyDocumentAppearance();
+}
+
+void ReaderWindow::applyDocumentAppearance() {
+    if (!themeBox || !reader || !pdfReader) return;
+
+    const QString theme = themeBox->currentData().toString();
+    const ReadingColors colors = colorsForTheme(theme, qApp->palette());
+    const bool dark = colors.page.lightnessF() < 0.5;
+    const QString accentSoft = cssRgba(colors.accent, 105);
+    const QString accentFaint = cssRgba(colors.accent, 50);
+
+    QPalette pdfPalette = pdfReader->palette();
+    pdfPalette.setColor(QPalette::Window, colors.background);
+    pdfReader->setPalette(pdfPalette);
+    pdfReader->setAccentColor(colors.accent);
+    reader->page()->setBackgroundColor(colors.page);
+
+    const QString css = QString(R"CSS(
+        :root {
+          color-scheme: %1;
+          --leaf-reader-page: %2;
+          --leaf-reader-ink: %3;
+          --leaf-reader-muted: %4;
+          --leaf-reader-accent: %5;
+          --leaf-reader-accent-soft: %6;
+          --leaf-reader-accent-faint: %7;
+        }
+        html, body {
+          background-color: var(--leaf-reader-page) !important;
+          color: var(--leaf-reader-ink) !important;
+        }
+        body { accent-color: var(--leaf-reader-accent); }
+        a:any-link { color: var(--leaf-reader-accent) !important; }
+        hr, blockquote { border-color: var(--leaf-reader-muted) !important; }
+        ::selection { background: var(--leaf-reader-accent-soft); color: %8; }
+    )CSS").arg(dark ? "dark" : "light", colors.page.name(), colors.ink.name(),
+                 colors.muted.name(), colors.accent.name(), accentSoft, accentFaint,
+                 colors.selectedInk.name());
+
+    reader->page()->runJavaScript(QString(R"JS(
+        (() => {
+          if (!document.documentElement) return;
+          let style = document.getElementById('__leaf_reader_appearance');
+          if (!style) {
+            style = document.createElement('style');
+            style.id = '__leaf_reader_appearance';
+            (document.head || document.documentElement).appendChild(style);
+          }
+          style.textContent = `%1`;
+        })();
+    )JS").arg(css));
 }
 
 void ReaderWindow::updateProgress() {
@@ -580,11 +672,19 @@ void ReaderWindow::setError(const QString &message) {
     reader->setHtml(QString("<div style='margin:15%%'><h2>That book didn't open</h2><p>%1</p></div>").arg(message.toHtmlEscaped()));
 }
 
+void ReaderWindow::changeEvent(QEvent *event) {
+    QMainWindow::changeEvent(event);
+    if (event->type() == QEvent::ApplicationPaletteChange && themeBox && reader
+        && pdfReader && fontSlider
+        && themeBox->currentData().toString() == "system")
+        applyAppearance();
+}
+
 void ReaderWindow::closeEvent(QCloseEvent *event) {
     savePosition();
     stopSpeech();
     QSettings s; s.setValue("window/geometry", saveGeometry()); s.setValue("appearance/fontSize", fontSlider->value());
-    s.setValue("appearance/theme", themeBox->currentIndex()); s.setValue("speech/rate", rateSlider->value());
+    s.setValue("appearance/readingTheme", themeBox->currentData().toString()); s.setValue("speech/rate", rateSlider->value());
     s.setValue("speech/readingCursor", cursorButton->isChecked());
     QMainWindow::closeEvent(event);
 }

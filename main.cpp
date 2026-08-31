@@ -1,6 +1,5 @@
 #include <QApplication>
 #include <QCommandLineParser>
-#include <QStyleFactory>
 #include "readerwindow.h"
 
 int main(int argc, char *argv[]) {
@@ -8,7 +7,6 @@ int main(int argc, char *argv[]) {
     QApplication::setApplicationName("Leaf Reader");
     QApplication::setOrganizationName("LeafReader");
     QApplication::setApplicationVersion("1.0");
-    app.setStyle(QStyleFactory::create("Fusion"));
 
     QCommandLineParser parser;
     parser.setApplicationDescription("A calm, private ebook reader");

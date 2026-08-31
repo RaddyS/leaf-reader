@@ -50,6 +50,12 @@ void PdfPageView::setZoomFactor(double factor) {
     renderPage();
 }
 
+void PdfPageView::setAccentColor(const QColor &color) {
+    if (!color.isValid() || accentColor == color) return;
+    accentColor = color;
+    update();
+}
+
 QString PdfPageView::speechText() {
     playbackStartWord = cursorEnabled ? cursorWord : 0;
     QString result;
@@ -106,8 +112,10 @@ void PdfPageView::paintEvent(QPaintEvent *) {
     const double sy = target.height() / points.height();
     QRectF highlight(target.left() + word.left() * sx, target.top() + word.top() * sy,
                      std::max(3.0, word.width() * sx), std::max(8.0, word.height() * sy));
-    painter.fillRect(highlight, QColor(85, 184, 121, 65));
-    painter.setPen(QPen(QColor(55, 160, 92), 3));
+    QColor fill = accentColor;
+    fill.setAlpha(65);
+    painter.fillRect(highlight, fill);
+    painter.setPen(QPen(accentColor, 3));
     painter.drawLine(highlight.topLeft(), highlight.bottomLeft());
 }
 

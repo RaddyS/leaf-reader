@@ -14,6 +14,7 @@ using local Piper neural voices—no book text is sent to a cloud service.
 - Selected-text or full-page speech
 - Offline Piper neural voices with automatic model discovery
 - Flite fallback through Qt Text-to-Speech
+- System-aware controls with System, Paper, Sepia, and Night reading themes
 - Manifest V3 Chromium extension for reading selected text or web articles
 - Synchronized moving word highlight in the Chromium extension
 - Shared local voices between the desktop app and browser extension
@@ -99,6 +100,11 @@ HTML, Markdown, text document, or PDF page to move the visible start marker.
 For PDFs the nearest word is highlighted; Read Aloud starts from that word.
 During playback the highlight advances with the generated audio timeline. An
 explicit selection in reflowable documents takes priority.
+
+Application controls follow the desktop's Qt/GTK palette, including live
+Omarchy light/dark theme changes. The **System** reading theme applies that
+palette to book content as well; Paper, Sepia, and Night change only the
+reading surface.
 
 ## Privacy and security
 

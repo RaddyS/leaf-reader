@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QColor>
 #include <QImage>
 #include <QWidget>
 #include <memory>
@@ -18,6 +19,7 @@ public:
     void setPage(int page);
     void setCursorEnabled(bool enabled);
     void setZoomFactor(double factor);
+    void setAccentColor(const QColor &color);
     QString speechText();
     void setPlaybackWord(int offset);
 
@@ -41,4 +43,5 @@ private:
     bool cursorEnabled = true;
     double zoomFactor = 1.0;
     double renderedScale = 1.0;
+    QColor accentColor = QColor(85, 184, 121);
 };
