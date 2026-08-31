@@ -10,8 +10,10 @@ class QComboBox;
 class QPushButton;
 class QSlider;
 class QWebEngineView;
+class QStackedWidget;
 class QTemporaryDir;
 class QProcess;
+class PdfPageView;
 
 struct Chapter { QString title; QString html; QString source; };
 
@@ -52,6 +54,8 @@ private:
     void setReadingCursorEnabled(bool enabled);
 
     QWebEngineView *reader;
+    PdfPageView *pdfReader;
+    QStackedWidget *contentStack;
     QListWidget *chaptersList;
     QLabel *bookTitle;
     QLabel *progressLabel;

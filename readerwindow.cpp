@@ -1,4 +1,5 @@
 #include "readerwindow.h"
+#include "pdfpageview.h"
 
 #include <QApplication>
 #include <QCloseEvent>
@@ -24,6 +25,7 @@
 #include <QSlider>
 #include <QSplitter>
 #include <QStandardPaths>
+#include <QStackedWidget>
 #include <QTemporaryDir>
 #include <QTextDocument>
 #include <QTimer>
@@ -136,7 +138,12 @@ ReaderWindow::ReaderWindow(QWidget *parent) : QMainWindow(parent) {
         if (loaded) setReadingCursorEnabled(cursorButton->isChecked());
     });
     reader->setHtml("<div style='margin:15%; text-align:center'><h1>Leaf Reader</h1><p>A quiet place for your books.</p><p>Open an EPUB, PDF, TXT, HTML, or Markdown file.</p></div>");
-    splitter->addWidget(sidebar); splitter->addWidget(reader);
+    pdfReader = new PdfPageView;
+    contentStack = new QStackedWidget;
+    contentStack->addWidget(reader);
+    contentStack->addWidget(pdfReader);
+    contentStack->setCurrentWidget(reader);
+    splitter->addWidget(sidebar); splitter->addWidget(contentStack);
     splitter->setStretchFactor(1, 1); splitter->setSizes({250, 900});
     setCentralWidget(splitter);
 
@@ -198,15 +205,18 @@ bool ReaderWindow::loadText(const QString &path) {
 }
 
 bool ReaderWindow::loadPdf(const QString &path) {
+    if (!pdfReader->load(path)) return false;
     QProcess process;
     process.start("pdftotext", {"-layout", path, "-"});
-    if (!process.waitForFinished(30000) || process.exitCode() != 0) return false;
-    QString text = QString::fromUtf8(process.readAllStandardOutput());
-    if (text.trimmed().isEmpty()) return false;
-    const QStringList pages = text.split(QChar::FormFeed);
-    int page = 1;
-    for (const QString &content : pages)
-        if (!content.trimmed().isEmpty()) chapters.push_back({QString("Page %1").arg(page++), QString("<pre style='white-space:pre-wrap'>%1</pre>").arg(content.toHtmlEscaped()), QFileInfo(path).absoluteFilePath()});
+    QStringList pages;
+    if (process.waitForFinished(30000) && process.exitCode() == 0)
+        pages = QString::fromUtf8(process.readAllStandardOutput()).split(QChar::FormFeed);
+    for (int page = 0; page < pdfReader->pageCount(); ++page) {
+        const QString content = page < pages.size() ? pages[page] : QString();
+        chapters.push_back({QString("Page %1").arg(page + 1),
+            QString("<pre style='white-space:pre-wrap'>%1</pre>").arg(content.toHtmlEscaped()),
+            QFileInfo(path).absoluteFilePath()});
+    }
     return !chapters.isEmpty();
 }
 
@@ -270,12 +280,13 @@ void ReaderWindow::showChapter(int index) {
     const Chapter &chapter = chapters[index];
     const QString ext = QFileInfo(currentPath).suffix().toLower();
     if (ext == "pdf") {
-        QUrl url = QUrl::fromLocalFile(currentPath);
-        url.setFragment(QString("page=%1").arg(index + 1));
-        reader->load(url);
+        contentStack->setCurrentWidget(pdfReader);
+        pdfReader->setPage(index);
     } else if (!chapter.source.isEmpty()) {
+        contentStack->setCurrentWidget(reader);
         reader->load(QUrl::fromLocalFile(chapter.source));
     } else {
+        contentStack->setCurrentWidget(reader);
         reader->setHtml(chapter.html, QUrl::fromLocalFile(QFileInfo(currentPath).absolutePath() + "/"));
     }
     updateProgress();
@@ -289,6 +300,7 @@ void ReaderWindow::speakText(const QString &rawText) {
 }
 
 void ReaderWindow::setReadingCursorEnabled(bool enabled) {
+    pdfReader->setCursorEnabled(enabled);
     const QString script = QString(R"JS(
         (() => {
           window.__leafCursorEnabled = %1;
@@ -366,9 +378,7 @@ void ReaderWindow::toggleSpeech() {
     }
 
     if (QFileInfo(currentPath).suffix().toLower() == "pdf" && currentChapter < chapters.size()) {
-        QTextDocument document;
-        document.setHtml(chapters[currentChapter].html);
-        speakText(document.toPlainText());
+        speakText(pdfReader->speechText());
         return;
     }
     reader->page()->runJavaScript(
@@ -466,6 +476,7 @@ void ReaderWindow::applyAppearance() {
         QLabel#bookTitle { font-size: 18px; font-weight: 700; padding: 8px 4px; }
     )").arg(bg, page, ink, muted, accent));
     reader->setZoomFactor(fontSlider->value() / 20.0);
+    pdfReader->setZoomFactor(fontSlider->value() / 20.0);
 }
 
 void ReaderWindow::updateProgress() {
