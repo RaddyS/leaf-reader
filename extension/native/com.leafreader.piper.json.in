@@ -1,0 +1,7 @@
+{
+  "name": "com.leafreader.piper",
+  "description": "Leaf Reader local Piper speech host",
+  "path": "@HOST_PATH@",
+  "type": "stdio",
+  "allowed_origins": ["chrome-extension://nfgjhdoflejmfonoaimjoncdgmlealdi/"]
+}

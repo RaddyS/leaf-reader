@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Leaf Reader
+Comment=Read EPUB, PDF and text books aloud
+Exec=leafreader %f
+Icon=accessories-dictionary
+Terminal=false
+Categories=Office;Viewer;
+MimeType=application/epub+zip;application/pdf;text/plain;text/html;text/markdown;
+StartupNotify=true

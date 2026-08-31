@@ -1,0 +1,16 @@
+.qmake.stash
+Makefile
+*.o
+moc_*.cpp
+moc_*.h
+leafreader
+.vscode/
+.idea/
+*.user
+*~
+__pycache__/
+*.py[cod]
+.venv/
+*.onnx
+*.onnx.json
+voices/
